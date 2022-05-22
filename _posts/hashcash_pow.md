@@ -1,0 +1,123 @@
+---
+layout: post
+title: 1. Proof-of-work
+---
+# Hashcash, proof-of-work
+
+Concepts from <a href=http://www.hashcash.org/hashcash.pdf>Hashcat proof-of-work.</a>
+
+So basically there are two functions that is the most important:
+* MINT(s : unique service indentifer, w: amount of leading zeroes) -> T (token)
+* VALUE(T, w) -> True/False : check to see if token meets w-zeroes requirement.
+
+However first, we need to implement something called the bit infix operator on bit-strings.
+Basically to check if 2 bstrings matched a certain leading (meaning left -> right) bits For example:
+
+    a = 11101110 0001110
+    b = 11101110 1101110
+    
+a matched b by 7 bits.
+
+However I can't seem to find out a way to do this on bits level (without being messy), so instead I do it on bytes:
+
+    a = 7D 8C D5 30
+    b = 7D 8C D4 12
+    
+So w = 6
+
+
+```python
+#libraries used
+import binascii, random, hashlib, struct
+```
+
+
+```python
+def infix_compare(a: bytes, b: bytes, w: int) -> bool:
+    h_a = binascii.hexlify(a).decode()
+    h_b = binascii.hexlify(b).decode()
+    if h_a[0:w] == h_b[0:w]:
+        return True
+    return False
+
+byte1 = bytes([0x7d, 0x8c, 0xd4, 0x30])
+byte2 = bytes([0x7d, 0x8c, 0xd5, 0x12])
+
+print(infix_compare(byte1, byte2, 5))
+print(infix_compare(byte1, byte2, 6))
+```
+
+    True
+    False
+
+
+Now let's try to implement MINT(s,w), or the token producer.
+Pseudo code for MINT(s,w):
+```
+find x so that Hash(s||x) = h and infix_compare(h, b"\x00" * k, w) -> True
+where k = fixed-length of the Hash(.) algorithm
+return (s, x)
+```
+So all MINT does is brute-force to find a certain token.
+However, I heard in the case of bitcoin, the x token is actually a `nonce` which is a number (4 bytes) that keeps incrementing starting from 0.
+Let's implement the Hash(.) first so the code is cleaner.
+
+
+
+```python
+def hasher(x):
+    h = hashlib.sha256()
+    h.update(x)
+    return h.digest()
+```
+
+
+```python
+random.seed(2005) #so it's not so random no more
+UNIQUE = bytes([random.randint(0,255) for i in range(32)])
+def MINT(s:bytes, w:int) -> (bytes, int):
+    nonce = 0
+    while True:
+        x = struct.pack('i', nonce)
+        h = hasher(s+x)
+        null_bytes = bytes(32) # create 32 bytes of '/x00'
+        if infix_compare(h, null_bytes, w):
+            return (s, nonce)
+        nonce += 1
+
+token = MINT(UNIQUE, 5)[1] # amoiunt of work : 5 hex-characters 0's
+print("Token: ",hex(token))
+```
+
+    Token:  0xb8684
+
+
+Let's see for ourself if token is actually valid.
+
+
+```python
+bytes_token = struct.pack('i', token)
+hashed = hasher(UNIQUE+bytes_token)
+print(binascii.hexlify(hashed).decode())
+```
+
+    0000064b319c70e777550a44d30a47deff8cd66f778e76a36d803b103fde74ed
+
+
+Let's also write a simple VALUE(s, T) function that verifies token T.
+
+
+```python
+def VALUE(s, nonce, w):
+    token = struct.pack('i', nonce)
+    hashed = hasher(s + token)
+    null_bytes = bytes(32)
+    if infix_compare(hashed, null_bytes, w):
+        return True
+    return False
+
+print(VALUE(UNIQUE, token, 5))
+```
+
+    True
+
